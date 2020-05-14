@@ -107,9 +107,9 @@ class CAPEval(object):
         config['classifier'] = config_classifier
 
         clf = SplitClassifier(self.X, self.y, config)
-        devacc, testacc = clf.run()
+        dev_score, test_score = clf.run()
         logging.debug('Dev acc : {0} Test acc : {1} for PreCo\n'
-                      .format(devacc, testacc))
-        return {'devacc': devacc, 'acc': testacc,
+                      .format(dev_score, test_score))
+        return {'dev_score': dev_score, 'score': test_score,
                 'ndev': len(self.data['valid']),
                 'ntest': len(self.data['test'])}
