@@ -15,12 +15,13 @@ from __future__ import absolute_import, division, unicode_literals
 import numpy as np
 import copy
 from enteval import utils
+from enteval.tools.score import Score
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 from sklearn.metrics import confusion_matrix
-
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 class PyTorchClassifier(object):
     def __init__(self, inputdim, nclasses, l2reg=0., batch_size=64, seed=1111,
@@ -61,7 +62,7 @@ class PyTorchClassifier(object):
     def fit(self, X, y, validation_data=None, validation_split=None,
             early_stop=True):
         self.nepoch = 0
-        bestaccuracy = -1
+        best_score = Score.empty()
         stop_train = False
         early_stop_count = 0
 
@@ -72,16 +73,16 @@ class PyTorchClassifier(object):
         # Training
         while not stop_train and self.nepoch <= self.max_epoch:
             self.trainepoch(trainX, trainy, epoch_size=self.epoch_size)
-            accuracy = self.score(devX, devy)
-            if accuracy > bestaccuracy:
-                bestaccuracy = accuracy
+            score = self.score(devX, devy)
+            if score.get_accuracy() > best_score.get_accuracy():
+                best_score = score
                 bestmodel = copy.deepcopy(self.model)
             elif early_stop:
                 if early_stop_count >= self.tenacity:
                     stop_train = True
                 early_stop_count += 1
         self.model = bestmodel
-        return bestaccuracy
+        return best_score
 
     def trainepoch(self, X, y, epoch_size=1):
         self.model.train()
@@ -111,7 +112,7 @@ class PyTorchClassifier(object):
 
     def score(self, devX, devy, test=False, return_score=False):
         self.model.eval()
-        correct = 0
+        #correct = 0
         if not isinstance(devX, torch.cuda.FloatTensor) or self.cudaEfficient:
             devX = torch.FloatTensor(devX).cuda()
             devy = torch.LongTensor(devy).cuda()
@@ -127,22 +128,25 @@ class PyTorchClassifier(object):
                     ybatch = ybatch.cuda()
                 output = self.model(Xbatch)
                 pred = output.data.max(1)[1]
-                correct += pred.long().eq(ybatch.data.long()).sum().item()
+                #correct += pred.long().eq(ybatch.data.long()).sum().item()
                 all_preds.append(pred.long().data.cpu().numpy().reshape(-1))
                 all_logits.append(F.softmax(output, -1).data.cpu()[:, -1].numpy().reshape(-1))
-            accuracy = 1.0 * correct / len(devX)
-        if test:
-            all_preds = np.concatenate(all_preds, 0)
+            #accuracy = 1.0 * correct / len(devX)
+            
             golden_labels = devy.data.cpu().numpy().reshape(-1)
+            all_preds = np.concatenate(all_preds, 0)
+            score = Score.from_data(golden_labels, all_preds)
+        if test:
             cm = confusion_matrix(golden_labels, all_preds)
             diag = [cm[i,i] for i in range(len(cm))]
             print(diag)
             print("number of instances", len(all_preds))
         if return_score:
             all_logits = np.concatenate(all_logits, 0)
-            return accuracy, all_logits
+            
+            return score, all_logits
         else:
-            return accuracy
+            return score
 
     def predict(self, devX):
         self.model.eval()
