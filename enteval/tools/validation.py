@@ -17,6 +17,7 @@ from __future__ import absolute_import, division, unicode_literals
 import logging
 import numpy as np
 from enteval.tools.classifier import MLP
+from enteval.tools.score import Score
 import enteval.tools.multiclassclassifier as multiclassclassifier
 
 import sklearn
@@ -24,6 +25,7 @@ assert(sklearn.__version__ >= "0.18.0"), \
     "need to update sklearn to version >= 0.18.0"
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
 
 def get_classif_name(classifier_config, usepytorch):
@@ -208,6 +210,9 @@ class SplitClassifier(object):
         if self.noreg:
             regs = [1e-9 if self.usepytorch else 1e9]
         scores = []
+        precs = []
+        recalls = []
+        f1s = []
         for reg in regs:
             if self.usepytorch:
                 clf = MLP(self.classifier_config, inputdim=self.featdim,
@@ -217,19 +222,25 @@ class SplitClassifier(object):
                 # TODO: Find a hack for reducing nb epoches in SNLI
                 clf.fit(self.X['train'], self.y['train'],
                         validation_data=(self.X['valid'], self.y['valid']))
+                
+                score = clf.score(self.X['valid'], self.y['valid'])
             else:
                 clf = LogisticRegression(C=reg, random_state=self.seed)
                 clf.fit(self.X['train'], self.y['train'])
-            scores.append(round(100*clf.score(self.X['valid'],
-                                self.y['valid']), 2))
+                
+                pred = clf.predict(self.X['valid'])
+                score = Score(self.y['valid'], pred)
+                
+            scores.append(score)
         logging.info([('reg:'+str(regs[idx]), scores[idx])
                       for idx in range(len(scores))])
-        optreg = regs[np.argmax(scores)]
-        devaccuracy = np.max(scores)
+        maxscorei = np.argmax([score.get_accuracy() for score in scores])
+        optreg = regs[maxscorei]
+        devscore = scores[maxscorei]
         logging.info('Validation : best param found is reg = {0} with score \
-            {1}'.format(optreg, devaccuracy))
-        clf = LogisticRegression(C=optreg, random_state=self.seed)
+            {1}'.format(optreg, devscore.get_accuracy()))
         logging.info('Evaluating...')
+
         if self.usepytorch:
             clf = MLP(self.classifier_config, inputdim=self.featdim,
                       nclasses=self.nclasses, l2reg=optreg,
@@ -238,15 +249,20 @@ class SplitClassifier(object):
             # TODO: Find a hack for reducing nb epoches in SNLI
             clf.fit(self.X['train'], self.y['train'],
                     validation_data=(self.X['valid'], self.y['valid']))
+            
+            testscore = clf.score(self.X['test'], self.y['test'], test=True, return_score=return_score)
         else:
             clf = LogisticRegression(C=optreg, random_state=self.seed)
             clf.fit(self.X['train'], self.y['train'])
+            pred = clf.predict(self.X['test'])
+            testscore = Score(self.y['test'], pred)
 
         logging.info("start predicting on test")
-        testaccuracy = clf.score(self.X['test'], self.y['test'], test=True, return_score=return_score)
-        if not return_score:
-            testaccuracy = round(100*testaccuracy, 2)
-        return devaccuracy, testaccuracy
+        
+        #if not return_score:
+        #    testaccuracy = round(100*testaccuracy, 2)
+
+        return devscore, testscore
 
 
 
@@ -283,19 +299,24 @@ class SplitMultiClassClassifier(object):
                           seed=self.seed, cudaEfficient=self.cudaEfficient)
 
                 # TODO: Find a hack for reducing nb epoches in SNLI
-                clf.fit(self.X['train'], self.y['train'],
+                score = clf.fit(self.X['train'], self.y['train'],
                         validation_data=(self.X['valid'], self.y['valid']))
             else:
                 clf = LogisticRegression(C=reg, random_state=self.seed)
                 clf.fit(self.X['train'], self.y['train'])
-            scores.append(round(100*clf.score(self.X['valid'],
-                                self.y['valid']), 2))
+
+                pred = clf.predict(self.X['valid'])
+                score = Score(self.y['valid'], pred)
+            scores.append(score)
+            #scores.append(round(100*clf.score(self.X['valid'],
+            #                    self.y['valid']), 2))
         logging.info([('reg:'+str(regs[idx]), scores[idx])
                       for idx in range(len(scores))])
-        optreg = regs[np.argmax(scores)]
-        devaccuracy = np.max(scores)
+        maxscorei = np.argmax([score.get_accuracy() for score in scores])
+        optreg = regs[maxscorei]
+        dev_score = scores[maxscorei]
         logging.info('Validation : best param found is reg = {0} with score \
-            {1}'.format(optreg, devaccuracy))
+            {1}'.format(optreg, dev_score.get_accuracy()))
         clf = LogisticRegression(C=optreg, random_state=self.seed)
         logging.info('Evaluating...')
         if self.usepytorch:
@@ -307,9 +328,9 @@ class SplitMultiClassClassifier(object):
             clf.fit(self.X['train'], self.y['train'],
                     validation_data=(self.X['valid'], self.y['valid']))
         else:
-            loggint.info("have to use pytorch with the SplitMultiClassClassifier.")
+            logging.info("have to use pytorch with the SplitMultiClassClassifier.")
             exit(-1)
 
-        testaccuracy = clf.score(self.X['test'], self.y['test'])
-        testaccuracy = round(100*testaccuracy, 2)
-        return devaccuracy, testaccuracy
+        test_score = clf.score(self.X['test'], self.y['test'])
+        #testaccuracy = round(100*testaccuracy, 2)
+        return dev_score, test_score
