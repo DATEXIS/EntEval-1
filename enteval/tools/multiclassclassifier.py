@@ -15,6 +15,7 @@ from __future__ import absolute_import, division, unicode_literals
 import numpy as np
 import copy
 from enteval import utils
+from enteval.tools.score import Score
 
 import torch
 from torch import nn
@@ -61,7 +62,7 @@ class PyTorchClassifier(object):
     def fit(self, X, y, validation_data=None, validation_split=None,
             early_stop=True):
         self.nepoch = 0
-        bestaccuracy = -1
+        best_score = Score.empty()
         stop_train = False
         early_stop_count = 0
 
@@ -72,16 +73,16 @@ class PyTorchClassifier(object):
         # Training
         while not stop_train and self.nepoch <= self.max_epoch:
             self.trainepoch(trainX, trainy, epoch_size=self.epoch_size)
-            accuracy = self.score(devX, devy)
-            if accuracy > bestaccuracy:
-                bestaccuracy = accuracy
+            score = self.score(devX, devy)
+            if score.get_accuracy() > best_score.get_accuracy():
+                best_score = score
                 bestmodel = copy.deepcopy(self.model)
             elif early_stop:
                 if early_stop_count >= self.tenacity:
                     stop_train = True
                 early_stop_count += 1
         self.model = bestmodel
-        return bestaccuracy
+        return best_score
 
     def trainepoch(self, X, y, epoch_size=1):
         self.model.train()
@@ -115,10 +116,11 @@ class PyTorchClassifier(object):
 
     def score(self, devX, devy):
         self.model.eval()
-        correct = 0
+        #correct = 0
         if not isinstance(devX, torch.cuda.FloatTensor) or self.cudaEfficient:
             devX = torch.FloatTensor(devX).cuda()
             devy = torch.LongTensor(devy).cuda()
+        all_preds = []
         with torch.no_grad():
             for i in range(0, len(devX), self.batch_size):
                 Xbatch = devX[i:i + self.batch_size]
@@ -133,10 +135,13 @@ class PyTorchClassifier(object):
                 output = output.view(batch_size, self.nclasses)
 
                 pred = output.data.max(1)[1]
+                all_preds.append(pred.long().data.cpu().numpy().reshape(-1))
                 # code.interact(local=locals())
-                correct += pred.long().eq(ybatch.data.long()).sum().item()
-            accuracy = 1.0 * correct / len(devX)
-        return accuracy
+                #correct += pred.long().eq(ybatch.data.long()).sum().item()
+            all_preds = np.concatenate(all_preds, 0)
+            score = Score.from_data(devy.data.cpu().numpy().reshape(-1), all_preds)
+            #accuracy = 1.0 * correct / len(devX)
+        return score
 
     def predict(self, devX):
         self.model.eval()
