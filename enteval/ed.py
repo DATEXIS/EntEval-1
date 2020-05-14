@@ -20,7 +20,7 @@ import code
 
 from enteval.tools.validation import SplitMultiClassClassifier
 from enteval.tools.validation import SplitClassifier
-
+from enteval.tools.score import Score
 
 class RareEval(object):
     def __init__(self, taskpath, use_name=False, seed=1111):
@@ -65,7 +65,7 @@ class RareEval(object):
     def loadFile(self, fpath):
         labels, contexts, descs = [], [], []
         data = []
-        with open(fpath, 'r') as f:
+        with open(fpath, 'r', encoding="utf-8") as f:
             for line in f:
                 if line.strip() == "":
                     # code.interact(local=locals())
@@ -128,10 +128,10 @@ class RareEval(object):
         config['classifier'] = config_classifier
 
         clf = SplitMultiClassClassifier(self.X, self.y, config)
-        devacc, testacc = clf.run()
-        logging.debug('Dev acc : {0} Test acc : {1} for Rare Entity Prediction\n'
-                      .format(devacc, testacc))
-        return {'devacc': devacc, 'acc': testacc,
+        dev_score, test_score = clf.run()
+        logging.debug('Dev score : {0} Test score : {1} for Rare Entity Prediction\n'
+                      .format(dev_score, test_score))
+        return {'dev_score': dev_score, 'score': test_score,
                 'ndev': len(self.data['valid'][0]),
                 'ntest': len(self.data['test'][0])}
 
@@ -166,7 +166,7 @@ class ConllYagoEval(object):
 
     def loadFile(self, fpath):
         contexts, descs = [], []
-        with open(fpath, 'r') as f:
+        with open(fpath, 'r', encoding="utf-8") as f:
             for line in f:
                 s, e, sent, _, entities = line.strip().split("\t", 4)
                 entities = entities.split("\t")
@@ -244,28 +244,28 @@ class ConllYagoEval(object):
         config['classifier'] = config_classifier
 
         clf = SplitClassifier(self.X, self.y, config)
-        devacc, testacc = clf.run(return_score=True)
-        testacc, all_logits = testacc
+        dev_score, test_score = clf.run(return_score=True)
+        test_score, all_logits = test_score
         _, descs = self.data[key]
         num_descs = [len(_descs) for _descs in descs]
         cums = [0] + np.cumsum(num_descs).tolist()
         all_logits_v1 = all_logits + self.priors["test"] - all_logits * self.priors["test"]
         # code.interact(local=locals()) 
         preds_v1 = np.array([np.argmax(all_logits_v1[cums[i]:cums[i+1]]) for i in range(len(cums)-1)])
-        testacc_v1 = (preds_v1==0).sum()/len(preds_v1)
+        test_score_v1 = Score.from_data(np.ones(preds_v1.shape), preds_v1==0)
         all_logits_v2 = all_logits + self.priors["test"]
         preds_v2 = np.array([np.argmax(all_logits_v2[cums[i]:cums[i+1]]) for i in range(len(cums)-1)])
-        testacc_v2 = (preds_v2==0).sum()/len(preds_v2)
+        test_score_v2 = Score.from_data(np.ones(preds_v2.shape), preds_v2==0)
         all_logits_v3 = all_logits * self.priors["test"]
         preds_v3 = np.array([np.argmax(all_logits_v3[cums[i]:cums[i+1]]) for i in range(len(cums)-1)])
-        testacc_v3 = (preds_v3==0).sum()/len(preds_v3)
+        test_score_v3 = Score.from_data(np.ones(preds_v3.shape), preds_v3==0)
         all_logits_prior = self.priors["test"]
         preds_prior = np.array([np.argmax(all_logits_prior[cums[i]:cums[i+1]]) for i in range(len(cums)-1)])
-        testacc_prior = (preds_prior==0).sum()/len(preds_prior)
+        test_score_prior = Score.from_data(np.ones(preds_prior.shape), preds_prior==0)
 
-        logging.debug('Dev acc : {0} Test acc v1: {1} Test acc v2: {2} Test acc v3: {3} Test acc prior: {4} for ConNLL Yago Entity Linking\n'
-                      .format(devacc, testacc_v1, testacc_v2, testacc_v3, testacc_prior))
-        return {'devacc': devacc, 'binarytestacc': testacc, 'testaccv1': testacc_v1,
-                'testaccv2': testacc_v2, 'testaccv3': testacc_v3, 'testacc_prior': testacc_prior, 
+        logging.debug('Dev score : {0} Test score v1: {1} Test score v2: {2} Test score v3: {3} Test score prior: {4} for ConNLL Yago Entity Linking\n'
+                      .format(dev_score, test_score_v1, test_score_v2, test_score_v3, test_score_prior))
+        return {'dev_score': dev_score, 'binary_test_score': test_score, 'test_score_v1': test_score_v1,
+                'test_score_v2': test_score_v2, 'test_score_v3': test_score_v3, 'test_score_prior': test_score_prior,
                 'ndev': len(self.data['valid'][0]),
                 'ntest': len(self.data['test'][0])}
