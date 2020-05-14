@@ -93,10 +93,10 @@ class EFPEval(object):
                                  'test': fever_embed['test']['y']},
                               config=config_classifier)
 
-        devacc, testacc = clf.run()
+        dev_score, test_score = clf.run()
         logging.debug('\nDev acc : {0} Test acc : {1} for \
-            {2} classification with {3} encoder \n'.format(devacc, testacc, self.task_name, "context" if self.use_ctx else "description"))
+            {2} classification with {3} encoder \n'.format(dev_score, test_score, self.task_name, "context" if self.use_ctx else "description"))
 
-        return {'devacc': devacc, 'acc': testacc,
+        return {'dev_score': dev_score, 'score': test_score,
                 'ndev': len(fever_embed['dev']['X']),
                 'ntest': len(fever_embed['test']['X'])}
