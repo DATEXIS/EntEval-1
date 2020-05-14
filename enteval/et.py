@@ -18,6 +18,7 @@ import logging
 import torch
 import torch.nn as nn
 import copy
+from enteval.tools.score import Score
 
 from sklearn.metrics import precision_score, recall_score, f1_score
 
@@ -112,12 +113,11 @@ class ETEval(object):
                             'dev': ultra_embed['dev']['y'],
                             'test': ultra_embed['test']['y']})
 
-        dev_f1, testacc, prec, recall, f1 = clf.run()
-        logging.debug('\nDev f1 : {} Test acc : {} Precision: {} Recall: {} F1 score: {} '
-            '{} classification\n'.format(dev_f1, testacc, prec, recall, f1, self.task_name))
+        dev_score, test_score = clf.run()
+        logging.debug('\nDev score : {} Test score : {} '
+            '{} classification\n'.format(dev_score, test_score, self.task_name))
 
-        return {'dev_f1': dev_f1, 'acc': testacc, 'precision': prec, 
-                "recall": recall, "f1": f1, 
+        return {'dev_score': dev_score, 'score': test_score,
                 'ndev': len(ultra_embed['dev']['X']),
                 'ntest': len(ultra_embed['test']['X'])}
 
@@ -160,23 +160,23 @@ class MLPClassifier():
         self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), weight_decay=1e-9)
 
     def fit(self, trainX, trainlabel, trainy, early_stop=True):
-        best_f1 = -1.
+        best_score = Score.empty()
         early_stop_count = 0
         stop_train = False
         self.nepoch = 0
         while not stop_train and self.nepoch <= self.max_epoch:
             self.trainepoch(trainX, trainlabel, trainy, epoch_size=self.epoch_size)
-            acc, prec, recall, f1 = self.evaluate(self.devX, self.devlabel, self.devy, istest=True)
-            logging.debug("epoch {} accuracy {} precition {} recall {} f1 {}\n".format(self.nepoch, acc, prec, recall, f1))
-            if f1 > best_f1:
-                best_f1 = f1
+            score = self.evaluate(self.devX, self.devlabel, self.devy, istest=True)
+            logging.debug("epoch {} score {}\n".format(self.nepoch, score))
+            if score.get_f1() > best_score.get_f1():
+                best_score = score
                 bestmodel = copy.deepcopy(self.model)
             elif early_stop:
                 if early_stop_count >= self.tenacity:
                     stop_train = True
                 early_stop_count += 1
         self.model = bestmodel
-        return best_f1
+        return best_score
 
     def evaluate(self, devX, devlabels, devy, threshold=0.5, istest=False):
         self.model.eval()
@@ -202,11 +202,12 @@ class MLPClassifier():
 
         if istest:
             all_outputs = np.concatenate(all_outputs, 0)
-            prec = precision_score(devy, all_outputs)
-            recall = recall_score(devy, all_outputs)
-            f1 = f1_score(devy, all_outputs)
+            score = Score.from_data(devy, all_outputs, average='binary')
+            #prec = precision_score(devy, all_outputs)
+            #recall = recall_score(devy, all_outputs)
+            #f1 = f1_score(devy, all_outputs)
 
-            return accuracy, prec, recall, f1
+            return score
         else:
             return accuracy
 
@@ -235,19 +236,19 @@ class MLPClassifier():
 
     def run(self):
         best_model = self.fit(self.trainX, self.trainlabel, self.trainy)
-        best_dev_f1 = -1
+        best_dev_score = Score.empty()
         best_threshold = 0.
         logging.debug("Tuning the optimal threshold on the dev set")
         num_to_tune = 20
         for i in range(num_to_tune + 1):
             threshold = i / num_to_tune
-            acc, prec, recall, f1 = self.evaluate(self.devX, self.devlabel, self.devy, threshold=threshold, istest=True)
-            logging.debug("threshold {} accuracy {} precition {} recall {} f1 {}\n".format(threshold, acc, prec, recall, f1))
-            if f1 > best_dev_f1:
-                best_dev_f1 = f1
+            score = self.evaluate(self.devX, self.devlabel, self.devy, threshold=threshold, istest=True)
+            logging.debug("threshold {} score {}\n".format(threshold, score))
+            if score.get_f1() > best_dev_score.get_f1():
+                best_dev_score = score
                 best_threshold = threshold
         logging.debug("best threshold: {}".format(best_threshold))
-        acc, prec, recall, f1 = self.evaluate(self.testX, self.testlabel, self.testy, best_threshold, istest=True)
-        return best_dev_f1, acc, prec, recall, f1
+        score = self.evaluate(self.testX, self.testlabel, self.testy, best_threshold, istest=True)
+        return best_dev_score, score
 
 
